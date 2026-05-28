@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import chalk from 'chalk';
+import inquirer from 'inquirer';
+import { execSync } from 'child_process';
+import { program } from 'commander';
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
@@ -118,4 +122,84 @@ function relativeTime(ts: number): string {
   return `${months}个月前`;
 }
 
-export { Project, decodePath, discoverProjects, relativeTime };
+function displayPath(fullPath: string): string {
+  const home = os.homedir();
+  return fullPath.startsWith(home) ? '~' + fullPath.slice(home.length) : fullPath;
+}
+
+async function selectAndLaunch(): Promise<void> {
+  const projects = discoverProjects();
+
+  if (projects.length === 0) {
+    console.log(chalk.yellow('没有找到 Claude Code 项目'));
+    return;
+  }
+
+  // Build choices for inquirer
+  const maxName = Math.max(...projects.map((p) => p.shortName.length));
+  const maxPath = Math.max(...projects.map((p) => displayPath(p.fullPath).length));
+
+  const choices = projects.map((p) => {
+    const name = p.shortName.padEnd(maxName + 2);
+    const dp = displayPath(p.fullPath).padEnd(maxPath + 2);
+    const sessions = `${p.sessionCount}会话`.padEnd(6);
+    const time = relativeTime(p.lastActive);
+    return {
+      name: `${name} ${chalk.gray(dp)} ${chalk.cyan(sessions)} ${chalk.gray(time)}`,
+      value: p,
+      short: p.shortName,
+    };
+  });
+
+  const { selected } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selected',
+      message: '选择项目',
+      choices,
+      pageSize: 20,
+      loop: false,
+    },
+  ]);
+
+  const project = selected as Project;
+
+  console.log(chalk.green(`\n启动 Claude → ${project.shortName}`));
+  console.log(chalk.gray(`目录: ${project.fullPath}\n`));
+
+  // Clean up stdin before handing off to claude
+  if (process.stdin.isTTY && process.stdin.setRawMode) {
+    try { process.stdin.setRawMode(false); } catch {}
+  }
+  process.stdin.removeAllListeners();
+  process.stdin.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EIO' || err.code === 'ENOTTY') process.exit(0);
+  });
+  process.stdin.pause();
+
+  try {
+    execSync('claude', { cwd: project.fullPath, stdio: 'inherit' });
+    process.exit(0);
+  } catch (error: any) {
+    if (error.signal === 'SIGINT') {
+      process.exit(0);
+    } else if (error.status !== undefined) {
+      process.exit(error.status);
+    } else {
+      console.log(chalk.red(`启动失败: ${error.message}`));
+      process.exit(1);
+    }
+  }
+}
+
+program
+  .name('ccp')
+  .description('Claude Code project switcher')
+  .version('0.1.0');
+
+program
+  .command('list', { isDefault: true })
+  .description('交互式选择项目并启动 Claude')
+  .action(selectAndLaunch);
+
+program.parse();

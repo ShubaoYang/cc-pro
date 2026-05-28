@@ -139,6 +139,92 @@ function relativeTime(ts: number): string {
   return `${months}个月前`;
 }
 
+interface Session {
+  sessionId: string;
+  firstMessage: string;
+  size: number; // bytes
+  lastActive: number; // timestamp ms
+}
+
+/**
+ * Format file size as human readable string
+ */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Extract first user message from a session jsonl file
+ */
+function getFirstMessage(filePath: string): string {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(8192);
+    const bytesRead = fs.readSync(fd, buffer, 0, 8192, 0);
+    fs.closeSync(fd);
+
+    const content = buffer.toString('utf8', 0, bytesRead);
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === 'user' && obj.message) {
+          const msgContent = obj.message.content;
+          let text = '';
+          if (typeof msgContent === 'string') {
+            text = msgContent;
+          } else if (Array.isArray(msgContent)) {
+            for (const block of msgContent) {
+              if (block.type === 'text') {
+                text = block.text;
+                break;
+              }
+            }
+          }
+          // Clean up and truncate
+          text = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+          return text.length > 30 ? text.slice(0, 30) + '...' : text;
+        }
+      } catch {}
+    }
+  } catch {}
+  return '';
+}
+
+/**
+ * Get all sessions for a project
+ */
+function getSessions(project: Project): Session[] {
+  const projectDir = path.join(PROJECTS_DIR, project.encodedName);
+  const files = fs.readdirSync(projectDir);
+  const jsonlFiles = files.filter(
+    (f) => f.endsWith('.jsonl') && !f.startsWith('agent-')
+  );
+
+  const sessions: Session[] = [];
+
+  for (const f of jsonlFiles) {
+    const filePath = path.join(projectDir, f);
+    const stat = fs.statSync(filePath);
+    const sessionId = f.replace('.jsonl', '');
+
+    sessions.push({
+      sessionId,
+      firstMessage: getFirstMessage(filePath),
+      size: stat.size,
+      lastActive: stat.mtimeMs,
+    });
+  }
+
+  // Sort by last active descending
+  sessions.sort((a, b) => b.lastActive - a.lastActive);
+  return sessions;
+}
+
 function displayPath(fullPath: string): string {
   const home = os.homedir();
   return fullPath.startsWith(home) ? '~' + fullPath.slice(home.length) : fullPath;
@@ -181,8 +267,55 @@ async function selectAndLaunch(): Promise<void> {
 
   const project = selected as Project;
 
+  // Session selection
+  const sessions = getSessions(project);
+  const NEW_SESSION = Symbol('new');
+
+  const sessionChoices: any[] = [
+    {
+      name: chalk.green('✨ 创建新会话'),
+      value: NEW_SESSION,
+      short: '新会话',
+    },
+  ];
+
+  if (sessions.length > 0) {
+    const maxId = 8;
+    const maxMsg = Math.max(...sessions.map((s) => s.firstMessage.length));
+
+    for (const s of sessions) {
+      const id = s.sessionId.slice(0, maxId);
+      const msg = s.firstMessage || chalk.gray('(空)');
+      const size = formatSize(s.size).padEnd(7);
+      const time = relativeTime(s.lastActive);
+      sessionChoices.push({
+        name: `${chalk.yellow(id)}  ${msg.padEnd(Math.min(maxMsg, 32))}  ${chalk.cyan(size)} ${chalk.gray(time)}`,
+        value: s.sessionId,
+        short: id,
+      });
+    }
+  }
+
+  const { session } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'session',
+      message: `选择会话 (${project.shortName})`,
+      choices: sessionChoices,
+      pageSize: 20,
+      loop: false,
+    },
+  ]);
+
+  const isNewSession = session === NEW_SESSION;
+  const args = isNewSession ? '' : `-r ${session}`;
+
   console.log(chalk.green(`\n启动 Claude → ${project.shortName}`));
-  console.log(chalk.gray(`目录: ${project.fullPath}\n`));
+  console.log(chalk.gray(`目录: ${project.fullPath}`));
+  if (!isNewSession) {
+    console.log(chalk.gray(`会话: ${(session as string).slice(0, 8)}`));
+  }
+  console.log();
 
   // Clean up stdin before handing off to claude
   if (process.stdin.isTTY && process.stdin.setRawMode) {
@@ -195,7 +328,8 @@ async function selectAndLaunch(): Promise<void> {
   process.stdin.pause();
 
   try {
-    execSync('claude', { cwd: project.fullPath, stdio: 'inherit' });
+    const cmd = isNewSession ? 'claude' : `claude ${args}`;
+    execSync(cmd, { cwd: project.fullPath, stdio: 'inherit' });
     process.exit(0);
   } catch (error: any) {
     if (error.signal === 'SIGINT') {

@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-git clone https://github.com/ShuBaoYang/cc-pro.git
+git clone https://github.com/ShubaoYang/cc-pro.git
 cd cc-pro
 npm install
 npm run build

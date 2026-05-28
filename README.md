@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-git clone https://github.com/your-repo/cc-pro.git
+git clone https://github.com/ShuBaoYang/cc-pro.git
 cd cc-pro
 npm install
 npm run build
@@ -25,7 +25,7 @@ ccp
 ```
 ? 选择项目 (↑↓ 切换, 回车确认)
 ❯ cc-pro          ~/Documents/code/liuding/cc-pro           1会话  刚刚
-  session_clean   ~/Documents/code/mindflow/ai/session_clean 3会话  2小时前
+  session_clean   ~/Documents/code/liuding/ai/session_clean 3会话  2小时前
   flink-cdc       ~/Documents/code/liuding/flink-cdc         2会话  3天前
 ```
 
@@ -34,7 +34,7 @@ ccp
 ```
 ? 选择会话 (cc-pro)
 ❯ ✨ 创建新会话
-  ad105672  你知道cc-tool么？...    2.1MB  刚刚
+  ad105672  你是谁？...    2.1MB  刚刚
   f3b2c891  帮我修复路径解码...      850KB  1天前
 ```
 

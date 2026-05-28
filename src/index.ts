@@ -156,41 +156,57 @@ function formatSize(bytes: number): string {
 }
 
 /**
- * Extract first user message from a session jsonl file
+ * Extract first user message from a session jsonl file.
+ * Reads line by line, stops after finding the first user message or 20 lines.
  */
 function getFirstMessage(filePath: string): string {
   try {
     const fd = fs.openSync(filePath, 'r');
-    const buffer = Buffer.alloc(8192);
-    const bytesRead = fs.readSync(fd, buffer, 0, 8192, 0);
-    fs.closeSync(fd);
+    const buf = Buffer.alloc(65536); // 64KB chunks
+    let remainder = '';
+    let linesRead = 0;
+    let result = '';
 
-    const content = buffer.toString('utf8', 0, bytesRead);
-    const lines = content.split('\n');
+    outer:
+    while (true) {
+      const bytesRead = fs.readSync(fd, buf, 0, buf.length, null);
+      if (bytesRead === 0) break;
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type === 'user' && obj.message) {
-          const msgContent = obj.message.content;
-          let text = '';
-          if (typeof msgContent === 'string') {
-            text = msgContent;
-          } else if (Array.isArray(msgContent)) {
-            for (const block of msgContent) {
-              if (block.type === 'text') {
-                text = block.text;
-                break;
+      const chunk = remainder + buf.toString('utf8', 0, bytesRead);
+      const lines = chunk.split('\n');
+      remainder = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        linesRead++;
+        if (linesRead > 20) break outer;
+
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'user' && obj.message) {
+            const msgContent = obj.message.content;
+            let text = '';
+            if (typeof msgContent === 'string') {
+              text = msgContent;
+            } else if (Array.isArray(msgContent)) {
+              for (const block of msgContent) {
+                if (block.type === 'text') {
+                  text = block.text;
+                  break;
+                }
               }
             }
+            text = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+            result = text.length > 30 ? text.slice(0, 30) + '...' : text;
+            break outer;
           }
-          // Clean up and truncate
-          text = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-          return text.length > 30 ? text.slice(0, 30) + '...' : text;
-        }
-      } catch {}
+        } catch {}
+      }
     }
+
+    fs.closeSync(fd);
+    return result;
   } catch {}
   return '';
 }

@@ -21,6 +21,7 @@ interface Project {
  * Decode encoded project directory name to real filesystem path.
  * Algorithm: replace leading `-` with `/`, split on `-`, then greedily
  * rebuild left-to-right checking fs.existsSync at each step.
+ * Also tries `_` as separator since Claude Code encodes both `/` and `_` as `-`.
  */
 function decodePath(encoded: string): { fullPath: string; shortName: string } {
   const pathStr = encoded.replace(/^-/, '/').replace(/-/g, '/');
@@ -35,11 +36,27 @@ function decodePath(encoded: string): { fullPath: string; shortName: string } {
     if (fs.existsSync(testPath)) {
       realSegments.push(accumulated);
       accumulated = '';
+    } else {
+      // Try replacing `-` with `_` in accumulated segment
+      const withUnderscore = accumulated.replace(/-/g, '_');
+      if (withUnderscore !== accumulated) {
+        const testPathUnderscore = '/' + realSegments.concat(withUnderscore).join('/');
+        if (fs.existsSync(testPathUnderscore)) {
+          realSegments.push(withUnderscore);
+          accumulated = '';
+        }
+      }
     }
   }
 
   if (accumulated) {
-    realSegments.push(accumulated);
+    // Final attempt: try underscore variant
+    const withUnderscore = accumulated.replace(/-/g, '_');
+    if (fs.existsSync('/' + realSegments.concat(withUnderscore).join('/'))) {
+      realSegments.push(withUnderscore);
+    } else {
+      realSegments.push(accumulated);
+    }
   }
 
   const fullPath = '/' + realSegments.join('/');

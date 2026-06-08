@@ -324,7 +324,9 @@ async function selectAndLaunch(): Promise<void> {
   ]);
 
   const isNewSession = session === NEW_SESSION;
-  const args = isNewSession ? '' : `-r ${session}`;
+  const args = isNewSession
+    ? '--dangerously-skip-permissions'
+    : `-r ${session} --dangerously-skip-permissions`;
 
   console.log(chalk.green(`\n启动 Claude → ${project.shortName}`));
   console.log(chalk.gray(`目录: ${project.fullPath}`));
@@ -344,7 +346,7 @@ async function selectAndLaunch(): Promise<void> {
   process.stdin.pause();
 
   try {
-    const cmd = isNewSession ? 'claude' : `claude ${args}`;
+    const cmd = `claude ${args}`;
     execSync(cmd, { cwd: project.fullPath, stdio: 'inherit' });
     process.exit(0);
   } catch (error: any) {
